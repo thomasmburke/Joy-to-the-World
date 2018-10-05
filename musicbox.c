@@ -1,475 +1,585 @@
-#include <msp430g2553.h>
+asm(" .length 10000");
+asm(" .width 132");
+// Oct 2015
+// TimerTone0 == produces a 1 Khz tone using TimerA, Channel 0
+// Toggled on and off with a button
+// Using the timer in up mode with NO INTERRUPT
+//
+// Sound is turned on and off by directly manipulating
+// the TACCTL0 register.  The half period is not dynamically
+// updated (though it can be changed in the debugger by
+// changing TACCR0.
+// The pushbutton is not debounced in any way!
+
+#include "msp430g2553.h"
+//-----------------------
+// The following definitions allow us to adjust some of the port properties
+// for the example:
+
+// define the bit mask (within P1) corresponding to output TA0
+#define SPEAKER 0x02
+
+// define the location for the button (this is the built in button)
+// specific bit for the button
+#define BUTTON_BIT 0x08
+#define TEMPOUP_BUTTON 0x04
+#define TEMPODOWN_BUTTON 0x80
+#define RESTART_BUTTON 0x20
+#define SWITCH_SONG_BUTTON 0x10
+//-------CREATING OUR NOTES-------------
+#define R      (1)//cant hear this frequency so it is used as our rest
+#define C4     (1911)
+#define C4s    (1803)
+#define D4     (1703)
+#define E4b    (1607)
+#define E4     (1517)
+#define F4     (1432)
+#define F4s    (1351)
+#define G4     (1276)
+#define G4s    (1204)
+#define A4     (1136)
+#define B4b    (1073)
+#define B4     (1012)
+#define C5     (956)
+#define C5s    (902)
+#define D5     (851)
+#define E5b    (803)
+#define E5     (758)
+#define F5     (716)
+#define F5s    (676)
+#define G5     (638)
+#define G5s    (602)
+#define A5     (568)
+#define B5b    (536)
+#define B5     (506)
+#define C6     (478)
+//-----------------------------
+
+//********CREATING OUR NOTE LENGTH********
+#define B 1//break between identical notes
+#define S 8//sixteenth note
+#define E 16//eigth
+#define DE 24//dotted eigth
+#define Q 32//quarter
+#define DQ 48//dotted quarter
+#define H 64//half
+#define DH 96//dotted half
+#define F 128//full note
+//****************************************
 
 
-// define the P1 port bitmask
-//----------------------------------
-#define LED             0x01
-#define SPEAKER         0x02    // TA0 is on this pin
-#define RESET_BUTTON    0x04
-#define PLAY_BUTTON     0x08
-#define SLOW_BUTTON     0x10
-#define FAST_BUTTON     0x20
-#define SONG1_BUTTON    0X40
-#define SONG2_BUTTON    0x80
+//***********GLOBAL VARIABLES*********************
+unsigned int note_length_counter=0;
+unsigned int note_counter=0;
+float tempo=2.25;
+unsigned char state='A';//A=song1, B=song2, C=nothing
+//**************************************************
 
-// define the note frequencies by half-period
-// Two octaves from C5 to C7
-//-------------------------------------------
-#define NUM_NOTES   26
-
-#define _R      1 // inaudible frequency
-
-#define _C4     1911
-#define _C4s    1803 // sharp
-#define _D4     1703
-#define _E4b    1607 // flat
-#define _E4     1517
-#define _F4     1432
-#define _F4s    1351 // sharp
-#define _G4     1276
-#define _G4s    1204 // sharp
-#define _A4     1136
-#define _B4b    1073 // flat
-#define _B4     1012
-#define _C5     956
-#define _C5s    902 // sharp
-#define _D5     851
-#define _E5b    803 // flat
-#define _E5     758
-#define _F5     716
-#define _F5s    676 // sharp
-#define _G5     638
-#define _G5s    602 // sharp
-#define _A5     568
-#define _B5b    536 // flat
-#define _B5     506
-#define _C6     478
-
-const unsigned int notes[NUM_NOTES] = {
-        _R, // rest (inaudible frequency)
-        _C4,_C4s,_D4,_E4b,_E4,_F4,_F4s,_G4,_G4s,_A4,_B4b,_B4, // 5th octave
-        _C5,_C5s,_D5,_E5b,_E5,_F5,_F5s,_G5,_G5s,_A5,_B5b,_B5, // 6th octave
-        _C6
+void init_timer(void); // routine to setup the timer
+//*****NOTES AND REST IN ORDER FOR JOY TO THE WORLD*****************
+#define JTW_LENGTH 72//length of joy to the world arrays
+unsigned const int jtw_notes[JTW_LENGTH]={
+		 C5,
+		 B4,
+		 A4,
+		 G4,
+		 F4,
+		 E4,
+		 D4,
+		 C4,
+		 G4,
+		 A4,
+		 R,//REST
+		 A4,
+		 B4,
+		 R,//REST
+		 B4,
+		 C5,
+		 R,//REST
+		 C5,
+		 R,//REST
+		 C5,
+		 B4,
+		 A4,
+		 G4,
+		 R,//REST
+		 G4,
+		 F4,
+		 E4,
+		 C5,
+		 R,//REST
+		 C5,
+		 B4,
+		 A4,
+		 G4,
+		 R,//REST
+		 G4,
+		 F4,
+		 E4,
+		 R,//REST
+		 E4,
+		 R,//REST
+		 E4,
+		 R,//REST
+		 E4,
+		 R,//REST
+		 E4,
+		 R,//REST
+		 E4,
+		 F4,
+		 G4,
+		 F4,
+		 E4,
+		 D4,
+		 R,//REST
+		 D4,
+		 R,//REST
+		 D4,
+		 R,//REST
+		 D4,
+		 E4,
+		 F4,
+		 E4,
+		 D4,
+		 E4,
+		 C5,
+		 A4,
+		 G4,
+		 F4,
+		 E4,
+		 F4,
+		 E4,
+		 D4,
+		 C4
 };
+// ******************************************************
 
-// bit mask for defining the score
-#define R       0x00
-#define C4      0x01
-#define C4s     0x02
-#define D4      0x03
-#define E4b     0x04
-#define E4      0x05
-#define F4      0x06
-#define F4s     0x07
-#define G4      0x08
-#define G4s     0x09
-#define A4      0x0A
-#define B4b     0x0B
-#define B4      0x0C
-#define C5      0x0D
-#define C5s     0x0E
-#define D5      0x0F
-#define E5b     0x10
-#define E5      0x11
-#define F5      0x12
-#define F5s     0x13
-#define G5      0x14
-#define G5s     0x15
-#define A5      0x16
-#define B5b     0x17
-#define B5      0x18
-#define C6      0x19
-
-#define NOTE_MASK   0x1F    // bit mask for isolating notes in score
-
-// define note durations
-//----------------------------------
-#define NUM_DURATIONS   8
-
-const unsigned char durations[NUM_DURATIONS] = {
-        1,  // quick break between adjacent notes of the same frequency
-        8,  // sixteenth note duration
-        16, // eigth
-        24, // dotted eigth
-        32, // quarter
-        48, // dotted quarter
-        64, // half
-        96  // dotted half
+//******LENGTH OF NOTES FOR JOY TO THE WORLD IN ORDER*****
+unsigned const char jtw_notelengths[JTW_LENGTH]={
+		Q,
+		DE,
+		S,
+		DQ,
+		E,
+		Q,
+		Q,
+		DQ,
+		E,
+		DQ,
+		B,
+		E,
+		DQ,
+		B,
+		E,
+		DQ,
+		B,
+		E,
+		B,
+		E,
+		E,
+		E,
+		E,
+		B,
+		DE,
+		S,
+		E,
+		E,
+		B,
+		E,
+		E,
+		E,
+		E,
+		B,
+		DE,
+		S,
+		E,
+		B,
+		E,
+		B,
+		E,
+		B,
+		E,
+		B,
+		E,
+		B,
+		S,
+		S,
+		DQ,
+		S,
+		S,
+		E,
+		B,
+		E,
+		B,
+		E,
+		B,
+		S,
+		S,
+		DQ,
+		S,
+		S,
+		E,
+		Q,
+		E,
+		DE,
+		S,
+		E,
+		E,
+		Q,
+		Q,
+		H
 };
+//********************************************************
 
-// bit mask for defining the score
-#define BREAK       0x00    // break between adjacent notes
-#define SIXTEENTH   0x20
-#define EIGTH       0x40
-#define D_EIGTH     0x60    // dotted eigth
-#define QUARTER     0x80
-#define D_QUARTER   0xA0    // dotted quarter
-#define HALF        0xC0
-#define D_HALF      0xE0    // dotted half
+//************FAKE SONG*******************************
+#define FAKESONG_LENGTH 73
+unsigned volatile int fakesong_notes[FAKESONG_LENGTH]={
+		B4,
+		R,
+		B4,
+		R,
+		B4,
+		R,
+		B4,
+		R,
+		B4,
+		R,
+		B4,
+		F4,
+		C5,
+		B4,
+		F4,
+		G5,
+		A5,
+		B5,
+		C4,
+		D5,
+		B4,
+		F5,
+		F4,
+		F5,
+		F4,
+		F5,
+		F4,
+		A4,
+		A5,
+		C4,
+		C5,
+		E4,
+		E5,
+		G5,
+		B4,
+		C4,
+		D4,
+		E4,
+		F4,
+		G4,
+		A5,
+		B5,
+		C5,
+		D5,
+		E5,
+		F5,
+		G4,
+		C4,
+		C5,
+		G4,
+		G5,
+		B4,
+		B5,
+		C4,
+		C5,
+		D4,
+		D5,
+		G4,
+		G5,
+		F4,
+		F5,
+		D4,
+		F4,
+		G4,
+		A4,
+		A5,
+		B5,
+		B4,
+		C4,
+		C5,
+		G4,
+		F4,
+		F5
 
-// To save space there is no whole note representation. This is simply
-// replaced by two half notes of the same frequency.
-
-// define "Joy to the World"
-//----------------------------------
-#define SONG1_LENGTH    72
-
-unsigned const char song1[SONG1_LENGTH] = {
-    (QUARTER + C5),     // 1st measure
-    (D_EIGTH + B4),
-    (SIXTEENTH + A4),
-    (D_QUARTER + G4),   // 2nd measure
-    (EIGTH + F4),
-    (QUARTER + E4),     // 3
-    (QUARTER + D4),
-    (D_QUARTER + C4),   // 4
-    (EIGTH + G4),
-    (D_QUARTER + A4),   // 5
-    (BREAK + R),
-    (EIGTH + A4),
-    (D_QUARTER + B4),   // 6
-    (BREAK + R),
-    (EIGTH + B4),
-    (D_QUARTER + C5),   // 7
-    (BREAK + R),
-    (EIGTH + C5),
-    (BREAK + R),
-    (EIGTH + C5),       // 8
-    (EIGTH + B4),
-    (EIGTH + A4),
-    (EIGTH + G4),
-    (BREAK + R),
-    (D_EIGTH + G4),     // 9
-    (SIXTEENTH + F4),
-    (EIGTH + E4),
-    (EIGTH + C5),
-    (BREAK + R),
-    (EIGTH + C5),       // 10
-    (EIGTH + B4),
-    (EIGTH + A4),
-    (EIGTH + G4),
-    (BREAK + R),
-    (D_EIGTH + G4),     // 11
-    (SIXTEENTH + F4),
-    (EIGTH + E4),
-    (BREAK + R),
-    (EIGTH + E4),
-    (BREAK + R),
-    (EIGTH + E4),       // 12
-    (BREAK + R),
-    (EIGTH + E4),
-    (BREAK + R),
-    (EIGTH + E4),
-    (BREAK + R),
-    (SIXTEENTH + E4),
-    (SIXTEENTH + F4),
-    (D_QUARTER + G4),   // 13
-    (SIXTEENTH + F4),
-    (SIXTEENTH + E4),
-    (EIGTH + D4),       // 14
-    (BREAK + R),
-    (EIGTH + D4),
-    (BREAK + R),
-    (EIGTH + D4),
-    (BREAK + R),
-    (SIXTEENTH + D4),
-    (SIXTEENTH + E4),
-    (D_QUARTER + F4),   // 15
-    (SIXTEENTH + E4),
-    (SIXTEENTH + D4),
-    (EIGTH + E4),       // 16
-    (QUARTER + C5),
-    (EIGTH + A4),
-    (D_EIGTH + G4),     // 17
-    (SIXTEENTH + F4),
-    (EIGTH + E4),
-    (EIGTH + F4),
-    (QUARTER + E4),     // 18
-    (QUARTER + D4),
-    (HALF + C4)         // 19
 };
+//****************************************************
 
+//*********FAKE SONG NOTE LENGTH**********************
+unsigned volatile char fakesong_note_length[FAKESONG_LENGTH]={
+		E,
+		B,
+		E,
+		B,
+		E,
+		B,
+		E,
+		B,
+		E,
+		B,
+		DQ,
+		Q,
+		H,
+		H,
+		E,
+		E,
+		E,
+		E,
+		E,
+		E,
+		E,
+		E,
+		DE,
+		Q,
+		Q,
+		DQ,
+		H,
+		E,
+		E,
+		DE,
+		DE,
+		S,
+		S,
+		S,
+		S,
+		DE,
+		Q,
+		Q,
+		Q,
+		H,
+		S,
+		S,
+		S,
+		S,
+		S,
+		E,
+		E,
+		S,
+		E,
+		S,
+		S,
+		S,
+		S,
+		S,
+		S,
+		S,
+		DQ,
+		Q,
+		Q,
+		Q,
+		DQ,
+		E,
+		E,
+		E,
+		E,
+		DE,
+		DE,
+		DE,
+		E,
+		E,
+		S,
+		S,
+		Q
 
+};
+//***************************************************
 
-// global state variables
-//----------------------------------
-#define DEFAULT_TEMPO   2.25
-#define FLASH_INTERVAL  30
+//***********************************
+void restart(void);
+void init_button_and_speaker(void);
+void init_timer(void);
+void raise_tempo(void);
+void lower_tempo(void);
+void song_switch(void);
+//***********************************
+void main(){
+	WDTCTL = (WDTPW + WDTTMSEL+WDTCNTCL+0+1);
+	IE1 |= WDTIE;
+	BCSCTL1 = CALBC1_1MHZ;    // 1Mhz calibration for clock
+	DCOCTL  = CALDCO_1MHZ;
 
-unsigned char sys_mod = 2;                  // system state, 0 = playing, 1 = paused, 2 = start of song, 3 = endofsong
-unsigned int curr_song_len = SONG1_LENGTH;  // current song length, default to song1
-const unsigned char *curr_song = song1;     // defaults to song1, "Joy to the World"
-unsigned int duration_counter = 0;          // counts the number of WDT cycles for the current note duration
-unsigned int score_counter = 0;             // indexes into the score for each note
-unsigned char flash_counter = 0;            // counts the number of WDT cycles per LED flash
-float tempo = DEFAULT_TEMPO;                // tempo, initial value 2.5, +/- increments of 0.125
-unsigned char isbreak = 0;                  // identifies whether the current note is a break or not
+	init_timer();  // initialize timer
+	init_button_and_speaker(); // initialize the button and speaker
+	restart();
+	_bis_SR_register(GIE+LPM0_bits);// enable general interrupts and power down CPU
 
-
-// function prototypes
-//----------------------------------
-void init_timerA(void);                     // routine to setup timerA (frequency generator)
-void init_WDT(void);                        // routine to setup WDT
-void init_P1(void);                         // routine to setup the I/O pins of Port 1
-void toggle_pause(void);                    // toggle between paused and not-paused
-void restart_song(void);                    // reset song from beginning, resets tempo
-void increase_tempo(void);                  // increase the song tempo
-void decrease_tempo(void);                  // decrease the song tempo
-void select_song1(void);                    // select song 1, restart song from beginning
-void select_song2(void);                    // select song 2, restart song from beginning
-
-// main
-//----------------------------------
-void main() {
-    BCSCTL1 = CALBC1_1MHZ;    // 1Mhz calibration for SMCLK clock
-    DCOCTL  = CALDCO_1MHZ;
-
-    init_P1();
-    init_WDT();
-    init_timerA();
-    restart_song();
-
-    _bis_SR_register(GIE+LPM0_bits);// enable general interrupts and power down CPU
 }
 
-// initialization functions
-//----------------------------------
+//*****************************
+// Sound Production System
+void init_timer(){              // initialization and start of timer
+	TA0CTL |= TACLR;            // reset clock
+	TA0CTL = TASSEL_2+ID_0+MC_1;// clock source = SMCLK
+	                            // clock divider=1
+	                            // UP mode
+	                            // timer A interrupt off
+	TA0CCTL0=0; // compare mode, output mode 0, no interrupt enabled
 
-// timerA is used as the frequency generator
-void init_timerA(void) {
-
-    TA0CTL |= TACLR;        // reset clock
-    TA0CTL = (TASSEL_2 +    // clock source = SMCLK
-              ID_0 +        // clock divider = 1
-              MC_1);        // UP mode
-                            // timer A interrupt off
-    TA0CCTL0=0;             // compare mode, output 0, no interrupt enabled
 }
 
-// WDT is used as the system "conductor"
-void init_WDT(void) {
+// *****************************
+// Button input System
+// Button toggles the state of the sound (on or off)
+// action will be interrupt driven on a downgoing signal on the pin
+// no debouncing (to see how this goes)
 
-      WDTCTL =  (WDTPW +    // password
-                 WDTTMSEL + // select interval timer mode
-                 WDTCNTCL + // clear watchdog timer counter
-                 0 +        // SMCLK is the source
-                 1);        // source/8k
+void init_button_and_speaker(){
+// All GPIO's are already inputs if we are coming in after a reset
 
-    // enable the WDT interrupt (in the system interrupt register IE1)
-    IE1 |= WDTIE;
+	//PAUSE/PLAY BUTTON
+	P1OUT |= BUTTON_BIT; // pullup
+	P1REN |= BUTTON_BIT; // enable resistor
+	P1IES |= BUTTON_BIT; // set for 1->0 transition
+	P1IFG &= ~BUTTON_BIT;// clear interrupt flag
+	P1IE  |= BUTTON_BIT;// enable interrupt
+
+	//INCREASE TEMPO BUTTON
+	P1OUT |= TEMPOUP_BUTTON; // pullup
+	P1REN |= TEMPOUP_BUTTON; // enable resistor
+	P1IES |= TEMPOUP_BUTTON; // set for 1->0 transition
+	P1IFG &= ~TEMPOUP_BUTTON;// clear interrupt flag
+	P1IE  |= TEMPOUP_BUTTON;// enable interrupt
+
+	//DECREASE TEMPO BUTTON
+	P1OUT |= TEMPODOWN_BUTTON; // pullup
+	P1REN |= TEMPODOWN_BUTTON; // enable resistor
+	P1IES |= TEMPODOWN_BUTTON; // set for 1->0 transition
+	P1IFG &= ~TEMPODOWN_BUTTON;// clear interrupt flag
+	P1IE  |= TEMPODOWN_BUTTON;// enable interrupt
+
+	//RESTART SONG BUTTON
+	P1OUT |= RESTART_BUTTON; // pullup
+	P1REN |= RESTART_BUTTON; // enable resistor
+	P1IES |= RESTART_BUTTON; // set for 1->0 transition
+	P1IFG &= ~RESTART_BUTTON;// clear interrupt flag
+	P1IE  |= RESTART_BUTTON;// enable interrupt
+
+	//SWITCH SONG BUTTON
+	P1OUT |= SWITCH_SONG_BUTTON; // pullup
+	P1REN |= SWITCH_SONG_BUTTON; // enable resistor
+	P1IES |= SWITCH_SONG_BUTTON; // set for 1->0 transition
+	P1IFG &= ~SWITCH_SONG_BUTTON;// clear interrupt flag
+	P1IE  |= SWITCH_SONG_BUTTON;// enable interrupt
+
+	//INITIALIZE SPEAKER
+	P1SEL|=SPEAKER; // connect timer output to pin
+	P1DIR|=SPEAKER;
+}
+void restart(){//restart song...
+	TA0CTL|=TACLR;
+	TACCTL0 &=~OUTMOD_4;
+	note_length_counter=0;
+	note_counter=0;
+	TA0CCR0=jtw_notes[0];
+}
+void lower_tempo(){//lower the speed of the song
+	tempo+=.25;
+}
+void raise_tempo(){//increase the speed of the song
+if(tempo>.25){
+		tempo-=.25;
 }
 
-// setup Port 1 GPIO pins
-void init_P1(void) {
-
-    P1DIR |= LED;       // LED indicator
-    P1OUT |= LED;
-
-    P1SEL |= SPEAKER;   // speaker
-    P1DIR |= SPEAKER;
-
-    // All remaining GPIOs are already inputs after reset
-
-    // Reset button:
-    // 1x press restarts the song
-    // 2x press changes songs
-    P1OUT |= RESET_BUTTON;  // pullup
-    P1REN |= RESET_BUTTON;  // enable pullup resistor
-    P1IES |= RESET_BUTTON;  // set for 1->0 transition
-    P1IFG &= ~RESET_BUTTON; // clear interrupt flag
-    P1IE  |= RESET_BUTTON;  // enable interrupt
-
-    // Play/Pause button:
-    P1OUT |= PLAY_BUTTON;   // pullup
-    P1REN |= PLAY_BUTTON;   // enable pullup resistor
-    P1IES |= PLAY_BUTTON;   // set for 1->0 transition
-    P1IFG &= ~PLAY_BUTTON;  // clear interrupt flag
-    P1IE  |= PLAY_BUTTON;   // enable interrupt
-
-    // Slower Tempo button:
-    P1OUT |= SLOW_BUTTON;   // pullup
-    P1REN |= SLOW_BUTTON;   // enable pullup resistor
-    P1IES |= SLOW_BUTTON;   // set for 1->0 transition
-    P1IFG &= ~SLOW_BUTTON;  // clear interrupt flag
-    P1IE  |= SLOW_BUTTON;   // enable interrupt
-
-    // Faster Tempo button:
-    P1OUT |= FAST_BUTTON;   // pullup
-    P1REN |= FAST_BUTTON;   // enable pullup resistor
-    P1IES |= FAST_BUTTON;   // set for 1->0 transition
-    P1IFG &= ~FAST_BUTTON;  // clear interrupt flag
-    P1IE  |= FAST_BUTTON;   // enable interrupt
-
-    // Song1 button:
-    P1OUT |= SONG1_BUTTON;  // pullup
-    P1REN |= SONG1_BUTTON;  // enable pullup resistor
-    P1IES |= SONG1_BUTTON;  // set for 1->0 transition
-    P1IFG &= ~SONG1_BUTTON; // clear interrupt flag
-    P1IE  |= SONG1_BUTTON;  // enable interrupt
-
-    // Song2 button:
-    P1OUT |= SONG2_BUTTON;  // pullup
-    P1REN |= SONG2_BUTTON;  // enable pullup resistor
-    P1IES |= SONG2_BUTTON;  // set for 1->0 transition
-    P1IFG &= ~SONG2_BUTTON; // clear interrupt flag
-    P1IE  |= SONG2_BUTTON;  // enable interrupt
+}
+void playsong2(){//play the fake song
+	if(FAKESONG_LENGTH>note_counter){
+			  		if(note_length_counter<(fakesong_note_length[note_counter])*tempo){//if you have not finished the note
+			  			note_length_counter++;//counting the note length
+			  		}
+			  		else{
+			  			note_counter++;//move to the next note in the song
+			  			TA0CCR0= fakesong_notes[note_counter];//play the note the note_counter indexes
+			  			note_length_counter=0;//set to the start of the note
+			  		}
+			  	}
+			  	else{
+			  		TACCTL0 &=~OUTMOD_4;//stop playing if song is finished
+			  	}
+}
+void playsong1(){//play joy to the world
+	if(JTW_LENGTH>note_counter){
+	  		if(note_length_counter<(jtw_notelengths[note_counter])*tempo){//if you have not finished the note
+	  			note_length_counter++;//counting the note length
+	  		}
+	  		else{
+	  			note_counter++;//move to the next note in the song
+	  			TA0CCR0= jtw_notes[note_counter];//play the note the note_counter indexes
+	  			note_length_counter=0;//set to the start of the note
+	  		}
+	  	}
+	  	else{
+	  		TACCTL0 &=~OUTMOD_4;//stop playing if song is finished
+	  	}
 }
 
-// runtime functions
-//----------------------------------
-
-// toggle play/pause
-void toggle_pause(void) {
-
-    if (sys_mod != 3) { // don't toggle after end of song
-
-        TACCTL0 ^= OUTMOD_4;    // toggle outmod between 0 and 4
-        sys_mod = !sys_mod;
-
-        if (!sys_mod) {
-            P1OUT &= ~LED;      // turn LED off when playing
-        }
-    }
+void song_switch(){
+	if(state=='A'){
+		state='B';
+		note_counter=0;
+		note_length_counter=0;
+	}
+	else if (state=='B'){
+		state='A';
+		note_counter=0;
+		note_length_counter=0;
+	}
+	else{
+		TACCTL0 &=~OUTMOD_4;
+	}
 }
 
-// decrease the song's tempo
-void decrease_tempo(void) {
-    if (tempo < 10.0) { // lower limit
-        tempo += 0.125;
-    }
+interrupt void button_handler(){
+// check interrupt comes from the desired bit...
+// (if not, just ignore -- cannot happen in this case)
+	if (P1IFG & BUTTON_BIT){
+		P1IFG &= ~BUTTON_BIT; // reset the interrupt flag
+		TACCTL0 ^= OUTMOD_4; // toggle outmod between 0 and 4 (toggle)
+	}
+	else if (P1IFG & TEMPOUP_BUTTON){
+		P1IFG &= ~TEMPOUP_BUTTON;
+		raise_tempo();//RAISE TEMPO BUTTON
+	}
+	else if (P1IFG & TEMPODOWN_BUTTON){
+			P1IFG &= ~TEMPODOWN_BUTTON;
+			lower_tempo();//LOWER TEMPO BUTTON
+		}
+	else if (P1IFG & RESTART_BUTTON){
+			P1IFG &= ~RESTART_BUTTON;
+			restart();//RESTART SONG
+		}
+	else if (P1IFG & SWITCH_SONG_BUTTON){
+			P1IFG &= ~SWITCH_SONG_BUTTON;
+			song_switch();//SWITCHSONG
+		}
 }
+ISR_VECTOR(button_handler,".int02") // declare interrupt vector
+// +++++++++++++++++++++++++++
+// ===== Watchdog Timer Interrupt Handler =====
+// This event handler is called to handle the watchdog timer interrupt,
+//    which is occurring regularly at intervals of about 8K/1.1MHz ~= 7.4ms.
 
-// increase the song's tempo
-void increase_tempo(void) {
-    if(tempo > 0.125) { // upper limit
-        tempo -= 0.125;
-    }
+interrupt void WDT_interval_handler(){
+	switch(state){
+	case 'A':
+		playsong1();
+		break;
+	case 'B':
+		playsong2();
+		break;
+	case 'C':
+		TACCTL0 &=~ OUTMOD_4;
+		break;
+	default:
+		break;
+	}
+
 }
-
-// restart current song from the beginning
-void restart_song(void) {
-    TA0CTL |= TACLR;        // reset clock
-    TACCTL0 &= ~OUTMOD_4;   // timer is initially off
-    duration_counter = 0;
-    score_counter = 0;
-    tempo = DEFAULT_TEMPO;  // reset tempo to default
-    isbreak = 0;
-    sys_mod = 2;
-    TA0CCR0 = notes[(curr_song[0] & NOTE_MASK)]-1; // in up mode counts from TAR=0 to TACCRO-1
-    P1OUT |= LED;           // steady LED indicates song ready
-}
-
-// select song 1, restart song from beginning
-void select_song1(void) {
-    sys_mod = 2;
-    curr_song = song1;
-    curr_song_len = SONG1_LENGTH;
-    restart_song();
-}
-
-// select song 2, restart song from beginning
-void select_song2(void) {
-    sys_mod = 2;
-    curr_song = song2;
-    curr_song_len = SONG2_LENGTH;
-    restart_song();
-}
-
-// interrupt handlers
-//----------------------------------
-
-// handles all button interrupts
-interrupt void button_handler(void) {
-
-    // check which interrupt occured
-    if (P1IFG & RESET_BUTTON) {
-        P1IFG &= ~RESET_BUTTON; // reset the interrupt flag
-        restart_song();
-    }
-    else if (P1IFG & PLAY_BUTTON) {
-        P1IFG &= ~PLAY_BUTTON;
-        // handle the play/pause behavior here
-        toggle_pause();
-    }
-    else if (P1IFG & SLOW_BUTTON) {
-        P1IFG &= ~SLOW_BUTTON;
-        // handle the slower tempo here
-        decrease_tempo();
-    }
-    else if (P1IFG & FAST_BUTTON) {
-        P1IFG &= ~FAST_BUTTON;
-        // handle the faster tempo here
-        increase_tempo();
-    }
-    else if (P1IFG & SONG1_BUTTON) {
-        P1IFG &= ~SONG1_BUTTON;
-        select_song1();
-    }
-    else if (P1IFG & SONG2_BUTTON) {
-        P1IFG &= ~SONG2_BUTTON;
-        select_song2();
-    }
-}
-
-// System Conductor
-// called every 1Mhz/8k = once every 8.2ms
-interrupt void WDT_interval_handler(void) {
-
-    if (sys_mod == 0) { // playing
-
-        if (score_counter < curr_song_len) {
-
-            if (!isbreak) {
-                if (duration_counter >= (durations[(curr_song[score_counter] >> 5)]) * tempo) {
-                    // setup next note in the score
-                    duration_counter = 0;
-                    score_counter++;
-
-                    TA0CCR0 = notes[(curr_song[score_counter] & NOTE_MASK)];
-
-                    if (durations[(curr_song[score_counter] >> 5)] == 1) { // break
-                        isbreak = 1;
-                    }
-                    else {
-                        isbreak = 0;
-                    }
-
-                }
-                else {
-                    duration_counter++;
-                }
-            }
-            // last note was a break
-            else {
-                duration_counter = 0;
-                score_counter++;
-                TA0CCR0 = notes[(curr_song[score_counter] & NOTE_MASK)];
-                isbreak = 0;
-            }
-
-        }
-        else {
-            // stop playing the song (stop TimerA)
-            sys_mod = 3;            // end of song
-            TACCTL0 &= ~OUTMOD_4;
-            P1OUT |= LED;           // steady LED indicates end of song
-        }
-    }
-    else if (sys_mod == 1) { // paused
-
-        // flash LED to indicate paused
-        if (flash_counter == FLASH_INTERVAL) {
-            flash_counter = 0;
-            P1OUT ^= LED;
-        }
-        else {
-            flash_counter++;
-        }
-    }
-}
-
-
-// declare interrupt handlers
-//----------------------------------
-ISR_VECTOR(button_handler,".int02")         // declare P1 interrupt handler
-ISR_VECTOR(WDT_interval_handler,".int10")   // declare WDT interrupt handler
+// DECLARE function WDT_interval_handler as handler for interrupt 10
+// using a macro defined in the msp430g2553.h include file
+ISR_VECTOR(WDT_interval_handler, ".int10")
